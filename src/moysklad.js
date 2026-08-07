@@ -98,7 +98,52 @@ export async function listProductionTasks({ limit = 50, momentFrom, momentTo } =
     quantity: t.quantity,
     applicable: t.applicable,
   }));
-}export async function getStockAll({ search, limit = 100 } = {}) {
+}
+
+export async function getProfitByProduct({ momentFrom, momentTo } = {}) {
+  const query = {};
+  if (momentFrom && momentTo) {
+    query.momentFrom = momentFrom;
+    query.momentTo = momentTo;
+  }
+  const data = await msRequest("/report/profit/byproduct", { query });
+  return (data.rows || []).map((r) => ({
+    name: r.assortment?.name,
+    productFolder: r.assortment?.pathName || r.assortment?.productFolder?.name || null,
+    sellQuantity: r.sellQuantity,
+    sellCostSum: kopecksToRubles(r.sellCostSum),
+    costSum: kopecksToRubles(r.costSum),
+    profit: kopecksToRubles(r.profit),
+    marginPercent:
+      r.costSum && r.costSum !== 0
+        ? Math.round((r.profit / r.costSum) * 10000) / 100
+        : null,
+  }));
+}
+
+export async function getMarginBySegment({ momentFrom, momentTo } = {}) {
+  const rows = await getProfitByProduct({ momentFrom, momentTo });
+  const bySegment = {};
+  for (const r of rows) {
+    const key = r.productFolder || "Без категории";
+    if (!bySegment[key]) {
+      bySegment[key] = { segment: key, revenue: 0, cost: 0, profit: 0, products: 0 };
+    }
+    bySegment[key].revenue += r.sellCostSum || 0;
+    bySegment[key].cost += r.costSum || 0;
+    bySegment[key].profit += r.profit || 0;
+    bySegment[key].products += 1;
+  }
+  return Object.values(bySegment).map((s) => ({
+    ...s,
+    revenue: Math.round(s.revenue * 100) / 100,
+    cost: Math.round(s.cost * 100) / 100,
+    profit: Math.round(s.profit * 100) / 100,
+    marginPercent: s.cost ? Math.round((s.profit / s.cost) * 10000) / 100 : null,
+  }));
+}
+
+export async function getStockAll({ search, limit = 100 } = {}) {
   const query = { limit };
   if (search) query.search = search;
   const data = await msRequest("/report/stock/all", { query });
@@ -131,51 +176,3 @@ export async function getCompanySettings() {
   const data = await msRequest("/context/companysettings");
   return data;
 }
-    cost: Math.round(s.cost * 100) / 100,
-    profit: Math.round(s.profit * 100) / 100,
-    marginPercent: s.cost ? Math.round((s.profit / s.cost) * 10000) / 100 : null,
-  }));
-}
-export async function getStockAll({ search, limit = 100 } = {}) {
-  const query = { limit };
-  if (search) query.search = search;
-  const data = await msRequest("/report/stock/all", { query });
-  return (data.rows || data).map((r) => ({
-    name: r.name,
-    code: r.code || null,
-    article: r.article || null,
-    quantity: r.quantity,
-    reserve: r.reserve,
-    inTransit: r.inTransit,
-    stock: r.stock,
-    price: kopecksToRubles(r.price),
-    salePrice: kopecksToRubles(r.salePrice),
-  }));
-}
-
-export async function listProducts({ search, limit = 100 } = {}) {
-  const query = { limit };
-  if (search) query.search = search;
-  const data = await msRequest("/entity/product", { query });
-  return (data.rows || []).map((p) => ({
-    id: p.id,
-    name: p.name,
-    code: p.code || null,
-    async function getCompanySettings() {
-  const response = await moyskladRequest('/context/companysettings');
-  return {
-    costTracking: response.priceTypes ? true : null, // уточним ниже
-    currency: response.currency?.name || null,
-    fifoEnabled: response.fifoEnabled ?? null,
-    raw: response // временно, чтобы увидеть полный ответ и понять точное поле
-  };
-}
-
-module.exports = {
-  // ...existing exports
-  getCompanySettings,
-};
-    article: p.article || null,
-  }));
-}
-
