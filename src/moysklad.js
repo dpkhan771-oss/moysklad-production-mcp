@@ -1,4 +1,4 @@
-import fetch from "node-fetch";
+  import fetch from "node-fetch";
 
 const BASE_URL = "https://api.moysklad.ru/api/remap/1.2";
 
