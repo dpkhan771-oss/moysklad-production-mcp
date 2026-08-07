@@ -10,6 +10,7 @@ import {
   getMarginBySegment,
   getStockAll,
   listProducts,
+  getCompanySettings,
 } from "./moysklad.js";
 
 function buildServer() {
@@ -77,7 +78,7 @@ function buildServer() {
     }
   );
 
- server.tool(
+  server.tool(
     "get_stock_all",
     "Остатки товаров на складах (сырьё и готовая продукция): количество, резерв, цена. Можно искать по названию.",
     { search: z.string().optional().describe("Поиск по названию товара") },
@@ -96,6 +97,17 @@ function buildServer() {
       return { content: [{ type: "text", text: JSON.stringify(products, null, 2) }] };
     }
   );
+
+  server.tool(
+    "get_company_settings",
+    "Настройки организации МойСклад: валюта, учёт себестоимости и прочие общие параметры.",
+    {},
+    async () => {
+      const settings = await getCompanySettings();
+      return { content: [{ type: "text", text: JSON.stringify(settings, null, 2) }] };
+    }
+  );
+
   return server;
 }
 
