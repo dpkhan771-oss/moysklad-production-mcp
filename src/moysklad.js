@@ -167,6 +167,20 @@ export async function listProducts({ search, limit = 100 } = {}) {
     id: p.id,
     name: p.name,
     code: p.code || null,
+    async function getCompanySettings() {
+  const response = await moyskladRequest('/context/companysettings');
+  return {
+    costTracking: response.priceTypes ? true : null, // уточним ниже
+    currency: response.currency?.name || null,
+    fifoEnabled: response.fifoEnabled ?? null,
+    raw: response // временно, чтобы увидеть полный ответ и понять точное поле
+  };
+}
+
+module.exports = {
+  // ...existing exports
+  getCompanySettings,
+};
     article: p.article || null,
   }));
 }
