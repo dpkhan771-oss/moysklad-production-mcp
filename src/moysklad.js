@@ -142,3 +142,32 @@ export async function getMarginBySegment({ momentFrom, momentTo } = {}) {
     marginPercent: s.cost ? Math.round((s.profit / s.cost) * 10000) / 100 : null,
   }));
 }
+export async function getStockAll({ search, limit = 100 } = {}) {
+  const query = { limit };
+  if (search) query.search = search;
+  const data = await msRequest("/report/stock/all", { query });
+  return (data.rows || data).map((r) => ({
+    name: r.name,
+    code: r.code || null,
+    article: r.article || null,
+    quantity: r.quantity,
+    reserve: r.reserve,
+    inTransit: r.inTransit,
+    stock: r.stock,
+    price: kopecksToRubles(r.price),
+    salePrice: kopecksToRubles(r.salePrice),
+  }));
+}
+
+export async function listProducts({ search, limit = 100 } = {}) {
+  const query = { limit };
+  if (search) query.search = search;
+  const data = await msRequest("/entity/product", { query });
+  return (data.rows || []).map((p) => ({
+    id: p.id,
+    name: p.name,
+    code: p.code || null,
+    article: p.article || null,
+  }));
+}
+
