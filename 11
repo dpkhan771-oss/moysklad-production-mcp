@@ -1,0 +1,322 @@
+{
+  "name": "moysklad-production-mcp",
+  "version": "1.0.0",
+  "description": "MCP-сервер: техкарты, производственные задания и анализ себестоимости для МоегоСклада",
+  "type": "module",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.7.0",
+    "express": "^4.19.2",
+    "node-fetch": "^3.3.2",
+    "zod": "^3.23.8"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
+
+# MCP-сервер: производство и себестоимость для МоегоСклада
+
+Дополнительный сервер, который вместе с готовым `@theyahia/moysklad-mcp`
+закрывает все нужные задачи:
+
+- `list_processing_plans` — список техкарт
+- `get_processing_plan_detail` — состав техкарты (сырьё, нормы расхода)
+- `list_production_tasks` — производственные задания и их статус
+- `get_profit_by_product` — себестоимость, выручка, маржа по каждому товару
+- `get_margin_by_segment` — то же самое, сгруппированное по категориям товаров
+
+## Деплой на Render (бесплатно)
+
+1. Зарегистрируйтесь на https://render.com (можно через Google-аккаунт)
+2. Загрузите эту папку как репозиторий на GitHub (или запросите у Claude
+   готовый zip-архив и просто перетащите его в Render — там есть вариант
+   "Deploy from a Git repository" и "Public Git repository URL")
+3. В Render: New → Web Service → укажите репозиторий
+4. Render автоматически найдёт `render.yaml` и предложит переменную
+   `MOYSKLAD_TOKEN` — вставьте туда токен из МоегоСклада
+   (Настройки → Обмен данными → API)
+5. После деплоя Render даст вам публичный адрес вида
+   `https://moysklad-production-mcp.onrender.com`
+6. URL для подключения как MCP-коннектора:
+   `https://moysklad-production-mcp.onrender.com/mcp`
+
+## Важно
+
+- Бесплатный тариф Render "засыпает" после 15 минут бездействия — первый
+  запрос после паузы будет выполняться на 20-30 секунд дольше.
+- Название сущности техкарты в API (`processingplan`) и производственного
+  задания (`productiontask`) стоит проверить на первом реальном запросе —
+  API МоегоСклада периодически меняет детали полей, документация сверялась
+  на момент написания кода.
+
+services:
+  - type: web
+    name: moysklad-production-mcp
+    env: node
+    plan: free
+    buildCommand: npm install
+import express from "express";
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
+import { z } from "zod";
+import {
+  listProcessingPlans,
+  getProcessingPlanDetail,
+  listProductionTasks,
+  getProfitByProduct,
+  getMarginBySegment,
+} from "./moysklad.js";
+
+function buildServer() {
+  const server = new McpServer({
+    name: "moysklad-production",
+    version: "1.0.0",
+  });
+
+  server.tool(
+    "list_processing_plans",
+    "Список технологических карт (техкарт) производства. Можно искать по названию.",
+    { search: z.string().optional().describe("Поиск по названию техкарты") },
+    async ({ search }) => {
+      const plans = await listProcessingPlans({ search });
+      return { content: [{ type: "text", text: JSON.stringify(plans, null, 2) }] };
+    }
+  );
+
+  server.tool(
+    "get_processing_plan_detail",
+    "Подробности техкарты: состав материалов (сырья) с нормами расхода и выпускаемая продукция. Используй для анализа и оптимизации производственных карт.",
+    { id: z.string().describe("UUID техкарты, полученный из list_processing_plans") },
+    async ({ id }) => {
+      const detail = await getProcessingPlanDetail(id);
+      return { content: [{ type: "text", text: JSON.stringify(detail, null, 2) }] };
+    }
+  );
+
+  server.tool(
+    "list_production_tasks",
+    "Список производственных заданий (заказов на производство) с их статусом и количеством.",
+    {
+      momentFrom: z.string().optional().describe("Дата начала периода, формат YYYY-MM-DD HH:MM:SS"),
+      momentTo: z.string().optional().describe("Дата конца периода, формат YYYY-MM-DD HH:MM:SS"),
+    },
+    async ({ momentFrom, momentTo }) => {
+      const tasks = await listProductionTasks({ momentFrom, momentTo });
+      return { content: [{ type: "text", text: JSON.stringify(tasks, null, 2) }] };
+    }
+  );
+
+  server.tool(
+    "get_profit_by_product",
+    "Отчёт по марже и себестоимости для каждого товара за период (выручка, себестоимость, прибыль, % маржи).",
+    {
+      momentFrom: z.string().optional().describe("Начало периода, YYYY-MM-DD HH:MM:SS"),
+      momentTo: z.string().optional().describe("Конец периода, YYYY-MM-DD HH:MM:SS"),
+    },
+    async ({ momentFrom, momentTo }) => {
+      const rows = await getProfitByProduct({ momentFrom, momentTo });
+      return { content: [{ type: "text", text: JSON.stringify(rows, null, 2) }] };
+    }
+  );
+
+  server.tool(
+    "get_margin_by_segment",
+    "Маржинальность, сгруппированная по сегментам (категориям/группам товаров) за период.",
+    {
+      momentFrom: z.string().optional().describe("Начало периода, YYYY-MM-DD HH:MM:SS"),
+      momentTo: z.string().optional().describe("Конец периода, YYYY-MM-DD HH:MM:SS"),
+    },
+    async ({ momentFrom, momentTo }) => {
+      const rows = await getMarginBySegment({ momentFrom, momentTo });
+      return { content: [{ type: "text", text: JSON.stringify(rows, null, 2) }] };
+    }
+  );
+
+  return server;
+}
+
+const app = express();
+app.use(express.json());
+
+app.get("/health", (req, res) => res.json({ status: "ok" }));
+
+app.post("/mcp", async (req, res) => {
+  try {
+    const server = buildServer();
+    const transport = new StreamableHTTPServerTransport({
+      sessionIdGenerator: undefined,
+    });
+    res.on("close", () => {
+      transport.close();
+      server.close();
+    });
+    await server.connect(transport);
+    await transport.handleRequest(req, res, req.body);
+  } catch (err) {
+    console.error(err);
+    if (!res.headersSent) {
+      res.status(500).json({ error: err.message });
+    }
+  }
+});
+
+const port = process.env.PORT || process.env.HTTP_PORT || 3000;
+app.listen(port, () => {
+  console.log(`moysklad-production-mcp слушает порт ${port}`);
+});
+
+    startCommand: npm start
+    envVars:
+      - key: MOYSKLAD_TOKEN
+        sync: false
+
+import fetch from "node-fetch";
+
+const BASE_URL = "https://api.moysklad.ru/api/remap/1.2";
+
+function authHeader() {
+  const token = process.env.MOYSKLAD_TOKEN;
+  if (token) {
+    return { Authorization: `Bearer ${token}` };
+  }
+  const login = process.env.MOYSKLAD_LOGIN;
+  const password = process.env.MOYSKLAD_PASSWORD;
+  if (login && password) {
+    const basic = Buffer.from(`${login}:${password}`).toString("base64");
+    return { Authorization: `Basic ${basic}` };
+  }
+  throw new Error(
+    "Не заданы переменные окружения MOYSKLAD_TOKEN или MOYSKLAD_LOGIN/MOYSKLAD_PASSWORD"
+  );
+}
+
+async function msRequest(path, { method = "GET", query, body } = {}) {
+  let url = `${BASE_URL}${path}`;
+  if (query && Object.keys(query).length > 0) {
+    const params = new URLSearchParams(query);
+    url += `?${params.toString()}`;
+  }
+  const res = await fetch(url, {
+    method,
+    headers: {
+      "Content-Type": "application/json",
+      "Accept-Encoding": "gzip",
+      ...authHeader(),
+    },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`МойСклад API ошибка ${res.status}: ${text.slice(0, 500)}`);
+  }
+  return res.json();
+}
+
+// Деньги в МоемСкладе хранятся в копейках
+export function kopecksToRubles(v) {
+  if (v === undefined || v === null) return null;
+  return Math.round((v / 100) * 100) / 100;
+}
+
+export async function listProcessingPlans({ search, limit = 50 } = {}) {
+  const query = { limit };
+  if (search) query.search = search;
+  const data = await msRequest("/entity/processingplan", { query });
+  return (data.rows || []).map((p) => ({
+    id: p.id,
+    name: p.name,
+    description: p.description || null,
+  }));
+}
+
+export async function getProcessingPlanDetail(id) {
+  const plan = await msRequest(`/entity/processingplan/${id}`, {
+    query: { expand: "materials,products" },
+  });
+
+  const materials = (plan.materials?.rows || plan.materials || []).map((m) => ({
+    name: m.assortment?.name || m.name || "неизвестно",
+    quantity: m.quantity,
+    unit: m.assortment?.unit?.name || null,
+    // норма расхода на единицу продукции, если задана
+    consumption: m.consumption ?? null,
+  }));
+
+  const products = (plan.products?.rows || plan.products || []).map((p) => ({
+    name: p.assortment?.name || p.name || "неизвестно",
+    quantity: p.quantity,
+  }));
+
+  return {
+    id: plan.id,
+    name: plan.name,
+    description: plan.description || null,
+    materials,
+    products,
+  };
+}
+
+export async function listProductionTasks({ limit = 50, momentFrom, momentTo } = {}) {
+  const query = { limit, order: "moment,desc" };
+  const filters = [];
+  if (momentFrom) filters.push(`moment>=${momentFrom}`);
+  if (momentTo) filters.push(`moment<=${momentTo}`);
+  if (filters.length) query.filter = filters.join(";");
+
+  const data = await msRequest("/entity/productiontask", { query });
+  return (data.rows || []).map((t) => ({
+    id: t.id,
+    name: t.name,
+    moment: t.moment,
+    state: t.state?.name || null,
+    quantity: t.quantity,
+    applicable: t.applicable,
+  }));
+}
+
+export async function getProfitByProduct({ momentFrom, momentTo } = {}) {
+  const query = {};
+  if (momentFrom && momentTo) {
+    query.momentFrom = momentFrom;
+    query.momentTo = momentTo;
+  }
+  const data = await msRequest("/report/profit/byproduct", { query });
+  return (data.rows || []).map((r) => ({
+    name: r.assortment?.name,
+    productFolder: r.assortment?.pathName || r.assortment?.productFolder?.name || null,
+    sellQuantity: r.sellQuantity,
+    sellCostSum: kopecksToRubles(r.sellCostSum),
+    costSum: kopecksToRubles(r.costSum),
+    profit: kopecksToRubles(r.profit),
+    marginPercent:
+      r.costSum && r.costSum !== 0
+        ? Math.round((r.profit / r.costSum) * 10000) / 100
+        : null,
+  }));
+}
+
+export async function getMarginBySegment({ momentFrom, momentTo } = {}) {
+  const rows = await getProfitByProduct({ momentFrom, momentTo });
+  const bySegment = {};
+  for (const r of rows) {
+    const key = r.productFolder || "Без категории";
+    if (!bySegment[key]) {
+      bySegment[key] = { segment: key, revenue: 0, cost: 0, profit: 0, products: 0 };
+    }
+    bySegment[key].revenue += r.sellCostSum || 0;
+    bySegment[key].cost += r.costSum || 0;
+    bySegment[key].profit += r.profit || 0;
+    bySegment[key].products += 1;
+  }
+  return Object.values(bySegment).map((s) => ({
+    ...s,
+    revenue: Math.round(s.revenue * 100) / 100,
+    cost: Math.round(s.cost * 100) / 100,
+    profit: Math.round(s.profit * 100) / 100,
+    marginPercent: s.cost ? Math.round((s.profit / s.cost) * 10000) / 100 : null,
+  }));
+}
