@@ -8,6 +8,8 @@ import {
   listProductionTasks,
   getProfitByProduct,
   getMarginBySegment,
+  getStockAll,
+  listProducts,
 } from "./moysklad.js";
 
 function buildServer() {
@@ -75,6 +77,25 @@ function buildServer() {
     }
   );
 
+ server.tool(
+    "get_stock_all",
+    "Остатки товаров на складах (сырьё и готовая продукция): количество, резерв, цена. Можно искать по названию.",
+    { search: z.string().optional().describe("Поиск по названию товара") },
+    async ({ search }) => {
+      const stock = await getStockAll({ search });
+      return { content: [{ type: "text", text: JSON.stringify(stock, null, 2) }] };
+    }
+  );
+
+  server.tool(
+    "list_products",
+    "Список товаров (справочник) с их ID, названием, кодом и артикулом. Можно искать по названию.",
+    { search: z.string().optional().describe("Поиск по названию товара") },
+    async ({ search }) => {
+      const products = await listProducts({ search });
+      return { content: [{ type: "text", text: JSON.stringify(products, null, 2) }] };
+    }
+  );
   return server;
 }
 
