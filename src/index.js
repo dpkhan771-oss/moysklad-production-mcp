@@ -21,10 +21,15 @@ function buildServer() {
 
   server.tool(
     "list_processing_plans",
-    "Список технологических карт (техкарт) производства. Можно искать по названию.",
-    { search: z.string().optional().describe("Поиск по названию техкарты") },
-    async ({ search }) => {
-      const plans = await listProcessingPlans({ search });
+    "Список технологических карт (техкарт) производства. Можно искать по названию. По умолчанию возвращает до 1000 карт; используй all=true, чтобы получить полный список за несколько запросов, либо offset для ручной постраничной навигации.",
+    {
+      search: z.string().optional().describe("Поиск по названию техкарты"),
+      limit: z.number().int().min(1).max(1000).optional().describe("Максимум записей за один запрос (по умолчанию 1000)"),
+      offset: z.number().int().min(0).optional().describe("Смещение для постраничной навигации"),
+      all: z.boolean().optional().describe("Забрать все страницы целиком, игнорируя limit/offset"),
+    },
+    async ({ search, limit, offset, all }) => {
+      const plans = await listProcessingPlans({ search, limit, offset, all });
       return { content: [{ type: "text", text: JSON.stringify(plans, null, 2) }] };
     }
   );

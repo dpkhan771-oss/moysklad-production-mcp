@@ -45,11 +45,36 @@ export function kopecksToRubles(v) {
   return Math.round((v / 100) * 100) / 100;
 }
 
-export async function listProcessingPlans({ search, limit = 50 } = {}) {
-  const query = { limit };
-  if (search) query.search = search;
-  const data = await msRequest("/entity/processingplan", { query });
-  return (data.rows || []).map((p) => ({
+export async function listProcessingPlans({ search, limit = 1000, offset = 0, all = false } = {}) {
+  const baseQuery = {};
+  if (search) baseQuery.search = search;
+
+  if (!all) {
+    const data = await msRequest("/entity/processingplan", {
+      query: { ...baseQuery, limit, offset },
+    });
+    return (data.rows || []).map((p) => ({
+      id: p.id,
+      name: p.name,
+      description: p.description || null,
+    }));
+  }
+
+  // Забираем все страницы, чтобы не ограничиваться лимитом одного запроса.
+  const pageSize = 1000;
+  const rows = [];
+  let currentOffset = offset;
+  while (true) {
+    const data = await msRequest("/entity/processingplan", {
+      query: { ...baseQuery, limit: pageSize, offset: currentOffset },
+    });
+    const pageRows = data.rows || [];
+    rows.push(...pageRows);
+    const total = data.meta?.size ?? rows.length;
+    currentOffset += pageSize;
+    if (pageRows.length < pageSize || currentOffset >= total) break;
+  }
+  return rows.map((p) => ({
     id: p.id,
     name: p.name,
     description: p.description || null,
@@ -57,8 +82,9 @@ export async function listProcessingPlans({ search, limit = 50 } = {}) {
 }
 
 export async function getProcessingPlanDetail(id) {
+  // expand требует явного limit<=100, иначе МойСклад молча игнорирует expand.
   const plan = await msRequest(`/entity/processingplan/${id}`, {
-    query: { expand: "materials,products" },
+    query: { expand: "materials.assortment,products.assortment", limit: 100 },
   });
 
   const materials = (plan.materials?.rows || plan.materials || []).map((m) => ({
@@ -83,7 +109,8 @@ export async function getProcessingPlanDetail(id) {
 }
 
 export async function listProductionTasks({ limit = 50, momentFrom, momentTo } = {}) {
-  const query = { limit, order: "moment,desc" };
+  // expand требует явного limit<=100, иначе МойСклад молча игнорирует expand.
+  const query = { limit: Math.min(limit, 100), order: "moment,desc", expand: "state" };
   const filters = [];
   if (momentFrom) filters.push(`moment>=${momentFrom}`);
   if (momentTo) filters.push(`moment<=${momentTo}`);
@@ -101,15 +128,32 @@ export async function listProductionTasks({ limit = 50, momentFrom, momentTo } =
 }
 
 export async function getProfitByProduct({ momentFrom, momentTo } = {}) {
-  const query = {};
+  const baseQuery = { expand: "assortment.productFolder" };
   if (momentFrom && momentTo) {
-    query.momentFrom = momentFrom;
-    query.momentTo = momentTo;
+    baseQuery.momentFrom = momentFrom;
+    baseQuery.momentTo = momentTo;
   }
-  const data = await msRequest("/report/profit/byproduct", { query });
-  return (data.rows || []).map((r) => ({
+
+  // expand требует явного limit<=100, иначе МойСклад молча игнорирует expand,
+  // поэтому пагинируем, чтобы не терять товары при большом ассортименте.
+  const pageSize = 100;
+  const rows = [];
+  let offset = 0;
+  while (true) {
+    const data = await msRequest("/report/profit/byproduct", {
+      query: { ...baseQuery, limit: pageSize, offset },
+    });
+    const pageRows = data.rows || [];
+    rows.push(...pageRows);
+    const total = data.meta?.size ?? rows.length;
+    offset += pageSize;
+    if (pageRows.length < pageSize || offset >= total) break;
+  }
+
+  return rows.map((r) => ({
     name: r.assortment?.name,
-    productFolder: r.assortment?.pathName || r.assortment?.productFolder?.name || null,
+    productFolder:
+      r.assortment?.productFolder?.name || r.assortment?.pathName || null,
     sellQuantity: r.sellQuantity,
     sellCostSum: kopecksToRubles(r.sellCostSum),
     costSum: kopecksToRubles(r.costSum),
