@@ -108,9 +108,21 @@ export async function getProcessingPlanDetail(id) {
   };
 }
 
+function mapAssortmentRows(field) {
+  return (field?.rows || (Array.isArray(field) ? field : [])).map((r) => ({
+    name: r.assortment?.name || r.name || "неизвестно",
+    quantity: r.quantity,
+    unit: r.assortment?.unit?.name || null,
+  }));
+}
+
 export async function listProductionTasks({ limit = 50, momentFrom, momentTo } = {}) {
   // expand требует явного limit<=100, иначе МойСклад молча игнорирует expand.
-  const query = { limit: Math.min(limit, 100), order: "moment,desc", expand: "state" };
+  const query = {
+    limit: Math.min(limit, 100),
+    order: "moment,desc",
+    expand: "state,positions.assortment,materials.assortment",
+  };
   const filters = [];
   if (momentFrom) filters.push(`moment>=${momentFrom}`);
   if (momentTo) filters.push(`moment<=${momentTo}`);
@@ -122,8 +134,10 @@ export async function listProductionTasks({ limit = 50, momentFrom, momentTo } =
     name: t.name,
     moment: t.moment,
     state: t.state?.name || null,
-    quantity: t.quantity,
     applicable: t.applicable,
+    positions: mapAssortmentRows(t.positions),
+    materials: mapAssortmentRows(t.materials),
+    rawTopLevelKeys: Object.keys(t),
   }));
 }
 
@@ -139,12 +153,7 @@ export async function getProductionTaskDetail(id) {
     },
   });
 
-  const mapRows = (field) =>
-    (field?.rows || (Array.isArray(field) ? field : [])).map((r) => ({
-      name: r.assortment?.name || r.name || "неизвестно",
-      quantity: r.quantity,
-      unit: r.assortment?.unit?.name || null,
-    }));
+  const mapRows = mapAssortmentRows;
 
   return {
     id: task.id,
