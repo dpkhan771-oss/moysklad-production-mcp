@@ -113,6 +113,7 @@ function mapAssortmentRows(rows) {
     name: r.assortment?.name || r.name || "неизвестно",
     quantity: r.quantity,
     unit: r.assortment?.unit?.name || null,
+    rawKeys: Object.keys(r), // ДИАГНОСТИКА: quantity пуст у productiontaskresult — ищем реальное имя поля
   }));
 }
 
