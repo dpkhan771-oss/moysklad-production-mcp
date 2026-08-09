@@ -116,15 +116,23 @@ function mapAssortmentRows(field) {
   }));
 }
 
+async function fetchProductsForTask(taskId) {
+  const task = await msRequest(`/entity/productiontask/${taskId}`, {
+    query: { expand: "products.assortment", limit: 100 },
+  });
+  return mapAssortmentRows(task.products);
+}
+
 export async function listProductionTasks({ limit = 50, momentFrom, momentTo } = {}) {
-  // expand требует явного limit<=100, иначе МойСклад молча игнорирует expand.
-  // Реальное поле productiontask с выпускаемой продукцией (подтверждено через
-  // rawTopLevelKeys) — "products", а не "positions"/"materials". У productionRows
-  // нет вложенного assortment, поэтому его не разворачиваем.
+  // МойСклад не разворачивает вложенные коллекции (products.assortment) в
+  // списочном запросе — "Expand поля 'products' не поддерживается" (только
+  // state/owner и другие одиночные ссылки допустимы в /entity/productiontask
+  // списком). Поэтому состав продукции дозапрашиваем отдельно по каждому
+  // заданию через единичный GET, небольшими параллельными пачками.
   const query = {
     limit: Math.min(limit, 100),
     order: "moment,desc",
-    expand: "state,products.assortment",
+    expand: "state",
   };
   const filters = [];
   if (momentFrom) filters.push(`moment>=${momentFrom}`);
@@ -132,14 +140,24 @@ export async function listProductionTasks({ limit = 50, momentFrom, momentTo } =
   if (filters.length) query.filter = filters.join(";");
 
   const data = await msRequest("/entity/productiontask", { query });
-  return (data.rows || []).map((t) => ({
+  const tasks = (data.rows || []).map((t) => ({
     id: t.id,
     name: t.name,
     moment: t.moment,
     state: t.state?.name || null,
     applicable: t.applicable,
-    products: mapAssortmentRows(t.products),
   }));
+
+  const concurrency = 8;
+  for (let i = 0; i < tasks.length; i += concurrency) {
+    const batch = tasks.slice(i, i + concurrency);
+    const productsBatch = await Promise.all(batch.map((t) => fetchProductsForTask(t.id)));
+    batch.forEach((t, idx) => {
+      t.products = productsBatch[idx];
+    });
+  }
+
+  return tasks;
 }
 
 export async function getProductionTaskDetail(id) {
