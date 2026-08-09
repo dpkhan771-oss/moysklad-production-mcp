@@ -116,19 +116,11 @@ function mapAssortmentRows(field) {
   }));
 }
 
-async function fetchProductsForTask(taskId) {
-  const task = await msRequest(`/entity/productiontask/${taskId}`, {
-    query: { expand: "products.assortment", limit: 100 },
-  });
-  return mapAssortmentRows(task.products);
-}
-
 export async function listProductionTasks({ limit = 50, momentFrom, momentTo } = {}) {
-  // МойСклад не разворачивает вложенные коллекции (products.assortment) в
-  // списочном запросе — "Expand поля 'products' не поддерживается" (только
-  // state/owner и другие одиночные ссылки допустимы в /entity/productiontask
-  // списком). Поэтому состав продукции дозапрашиваем отдельно по каждому
-  // заданию через единичный GET, небольшими параллельными пачками.
+  // ДИАГНОСТИКА: expand "products"/"positions"/"materials" во всех вариантах
+  // упирается в ошибку 1089 "Expand поля ... не поддерживается", в т.ч. на
+  // единичном GET. Временно вообще не разворачиваем products — смотрим,
+  // что МойСклад отдаёт "как есть" (raw), чтобы понять реальную форму поля.
   const query = {
     limit: Math.min(limit, 100),
     order: "moment,desc",
@@ -146,23 +138,15 @@ export async function listProductionTasks({ limit = 50, momentFrom, momentTo } =
     moment: t.moment,
     state: t.state?.name || null,
     applicable: t.applicable,
+    rawProducts: t.products,
   }));
-
-  const concurrency = 8;
-  for (let i = 0; i < tasks.length; i += concurrency) {
-    const batch = tasks.slice(i, i + concurrency);
-    const productsBatch = await Promise.all(batch.map((t) => fetchProductsForTask(t.id)));
-    batch.forEach((t, idx) => {
-      t.products = productsBatch[idx];
-    });
-  }
 
   return tasks;
 }
 
 export async function getProductionTaskDetail(id) {
   const task = await msRequest(`/entity/productiontask/${id}`, {
-    query: { expand: "products.assortment,state", limit: 100 },
+    query: { expand: "state", limit: 100 },
   });
 
   return {
@@ -171,7 +155,7 @@ export async function getProductionTaskDetail(id) {
     moment: task.moment,
     state: task.state?.name || null,
     applicable: task.applicable,
-    products: mapAssortmentRows(task.products),
+    rawProducts: task.products,
     rawTopLevelKeys: Object.keys(task),
   };
 }
