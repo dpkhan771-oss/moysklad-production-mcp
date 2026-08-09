@@ -127,6 +127,38 @@ export async function listProductionTasks({ limit = 50, momentFrom, momentTo } =
   }));
 }
 
+// Диагностический метод: выводит сырые ключи верхнего уровня объекта задания
+// вместе с распознанными позициями/материалами, чтобы подтвердить реальные
+// названия полей МойСклад для планируемой к выпуску продукции конкретного
+// производственного задания (в списке /entity/productiontask они не разворачиваются).
+export async function getProductionTaskDetail(id) {
+  const task = await msRequest(`/entity/productiontask/${id}`, {
+    query: {
+      expand: "positions.assortment,materials.assortment,products.assortment,state",
+      limit: 100,
+    },
+  });
+
+  const mapRows = (field) =>
+    (field?.rows || (Array.isArray(field) ? field : [])).map((r) => ({
+      name: r.assortment?.name || r.name || "неизвестно",
+      quantity: r.quantity,
+      unit: r.assortment?.unit?.name || null,
+    }));
+
+  return {
+    id: task.id,
+    name: task.name,
+    moment: task.moment,
+    state: task.state?.name || null,
+    applicable: task.applicable,
+    positions: mapRows(task.positions),
+    materials: mapRows(task.materials),
+    products: mapRows(task.products),
+    rawTopLevelKeys: Object.keys(task),
+  };
+}
+
 export async function getProfitByProduct({ momentFrom, momentTo } = {}) {
   const baseQuery = { expand: "assortment.productFolder" };
   if (momentFrom && momentTo) {

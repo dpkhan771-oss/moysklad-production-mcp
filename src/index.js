@@ -6,6 +6,7 @@ import {
   listProcessingPlans,
   getProcessingPlanDetail,
   listProductionTasks,
+  getProductionTaskDetail,
   getProfitByProduct,
   getMarginBySegment,
   getStockAll,
@@ -54,6 +55,16 @@ function buildServer() {
     async ({ momentFrom, momentTo }) => {
       const tasks = await listProductionTasks({ momentFrom, momentTo });
       return { content: [{ type: "text", text: JSON.stringify(tasks, null, 2) }] };
+    }
+  );
+
+  server.tool(
+    "get_production_task_detail",
+    "Диагностика: подробности конкретного производственного задания, включая распознанные позиции выпускаемой продукции и сырых ключей объекта (для проверки реальных названий полей МойСклад).",
+    { id: z.string().describe("UUID производственного задания, полученный из list_production_tasks") },
+    async ({ id }) => {
+      const detail = await getProductionTaskDetail(id);
+      return { content: [{ type: "text", text: JSON.stringify(detail, null, 2) }] };
     }
   );
 
