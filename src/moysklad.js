@@ -118,10 +118,13 @@ function mapAssortmentRows(field) {
 
 export async function listProductionTasks({ limit = 50, momentFrom, momentTo } = {}) {
   // expand требует явного limit<=100, иначе МойСклад молча игнорирует expand.
+  // Реальные поля productiontask (подтверждено через rawTopLevelKeys) — это
+  // "products" (выпускаемая продукция) и "productionRows" (позиции с сырьём/
+  // расходом материалов), а не "positions"/"materials".
   const query = {
     limit: Math.min(limit, 100),
     order: "moment,desc",
-    expand: "state,positions.assortment,materials.assortment",
+    expand: "state,products.assortment,productionRows.assortment",
   };
   const filters = [];
   if (momentFrom) filters.push(`moment>=${momentFrom}`);
@@ -135,25 +138,18 @@ export async function listProductionTasks({ limit = 50, momentFrom, momentTo } =
     moment: t.moment,
     state: t.state?.name || null,
     applicable: t.applicable,
-    positions: mapAssortmentRows(t.positions),
-    materials: mapAssortmentRows(t.materials),
-    rawTopLevelKeys: Object.keys(t),
+    products: mapAssortmentRows(t.products),
+    productionRows: mapAssortmentRows(t.productionRows),
   }));
 }
 
-// Диагностический метод: выводит сырые ключи верхнего уровня объекта задания
-// вместе с распознанными позициями/материалами, чтобы подтвердить реальные
-// названия полей МойСклад для планируемой к выпуску продукции конкретного
-// производственного задания (в списке /entity/productiontask они не разворачиваются).
 export async function getProductionTaskDetail(id) {
   const task = await msRequest(`/entity/productiontask/${id}`, {
     query: {
-      expand: "positions.assortment,materials.assortment,products.assortment,state",
+      expand: "products.assortment,productionRows.assortment,state",
       limit: 100,
     },
   });
-
-  const mapRows = mapAssortmentRows;
 
   return {
     id: task.id,
@@ -161,9 +157,8 @@ export async function getProductionTaskDetail(id) {
     moment: task.moment,
     state: task.state?.name || null,
     applicable: task.applicable,
-    positions: mapRows(task.positions),
-    materials: mapRows(task.materials),
-    products: mapRows(task.products),
+    products: mapAssortmentRows(task.products),
+    productionRows: mapAssortmentRows(task.productionRows),
     rawTopLevelKeys: Object.keys(task),
   };
 }
