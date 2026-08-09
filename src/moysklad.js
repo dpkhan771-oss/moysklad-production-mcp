@@ -18,7 +18,11 @@ function authHeader() {
   );
 }
 
-async function msRequest(path, { method = "GET", query, body } = {}) {
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function msRequest(path, { method = "GET", query, body } = {}, retriesLeft = 3) {
   let url = `${BASE_URL}${path}`;
   if (query && Object.keys(query).length > 0) {
     const params = new URLSearchParams(query);
@@ -33,6 +37,12 @@ async function msRequest(path, { method = "GET", query, body } = {}) {
     },
     body: body ? JSON.stringify(body) : undefined,
   });
+  if (res.status === 429 && retriesLeft > 0) {
+    // МойСклад ограничивает число одновременных запросов (code 1073) — при
+    // параллельных пачках запросов это ожидаемо, ретраим с задержкой.
+    await sleep(700);
+    return msRequest(path, { method, query, body }, retriesLeft - 1);
+  }
   if (!res.ok) {
     const text = await res.text().catch(() => "");
     throw new Error(`МойСклад API ошибка ${res.status}: ${text.slice(0, 500)}`);
@@ -149,7 +159,7 @@ export async function listProductionTasks({ limit = 50, momentFrom, momentTo } =
     applicable: t.applicable,
   }));
 
-  const concurrency = 8;
+  const concurrency = 3;
   for (let i = 0; i < tasks.length; i += concurrency) {
     const batch = tasks.slice(i, i + concurrency);
     const productsBatch = await Promise.all(batch.map((t) => fetchTaskProducts(t.id)));
