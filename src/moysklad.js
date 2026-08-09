@@ -139,15 +139,73 @@ async function fetchTaskProducts(taskId) {
   return mapAssortmentRows(data.rows || data);
 }
 
+async function attachProducts(tasks) {
+  const concurrency = 3;
+  for (let i = 0; i < tasks.length; i += concurrency) {
+    const batch = tasks.slice(i, i + concurrency);
+    const productsBatch = await Promise.all(batch.map((t) => fetchTaskProducts(t.id)));
+    batch.forEach((t, idx) => {
+      t.products = productsBatch[idx];
+    });
+  }
+  return tasks;
+}
+
 export async function listProductionTasks({ limit = 50, momentFrom, momentTo } = {}) {
+  const filters = [];
+  if (momentFrom) filters.push(`moment>=${momentFrom}`);
+  if (momentTo) filters.push(`moment<=${momentTo}`);
+
+  // Инструмент list_production_tasks в MCP-схеме принимает только momentFrom/
+  // momentTo (без отдельного флага агрегации). Поэтому: если задан ПОЛНЫЙ
+  // период (обе границы), считаем, что вызывающий хочет сводку по всему
+  // периоду, и забираем ВСЕ страницы заданий (не ограничиваясь одной), сразу
+  // суммируя выпуск по названию продукции. Без периода — обычный список
+  // последних заданий (limit), как раньше.
+  if (momentFrom && momentTo) {
+    const pageSize = 100;
+    const allTasks = [];
+    let offset = 0;
+    while (true) {
+      const data = await msRequest("/entity/productiontask", {
+        query: { limit: pageSize, offset, order: "moment,desc", expand: "state", filter: filters.join(";") },
+      });
+      const rows = data.rows || [];
+      allTasks.push(
+        ...rows.map((t) => ({ id: t.id, moment: t.moment, state: t.state?.name || null }))
+      );
+      const total = data.meta?.size ?? allTasks.length;
+      offset += pageSize;
+      if (rows.length < pageSize || offset >= total) break;
+    }
+
+    const completed = allTasks.filter((t) => (t.state || "").toLowerCase().includes("выполн"));
+    await attachProducts(completed);
+
+    const byProduct = {};
+    for (const t of completed) {
+      for (const p of t.products) {
+        const key = p.name;
+        if (!byProduct[key]) byProduct[key] = { product: key, unit: p.unit, quantity: 0, taskCount: 0 };
+        byProduct[key].quantity += p.quantity || 0;
+        byProduct[key].taskCount += 1;
+      }
+    }
+
+    return {
+      tasksTotal: allTasks.length,
+      tasksCompleted: completed.length,
+      products: Object.values(byProduct)
+        .map((r) => ({ ...r, quantity: Math.round(r.quantity * 100) / 100 }))
+        .sort((a, b) => b.quantity - a.quantity),
+    };
+  }
+
   const query = {
     limit: Math.min(limit, 100),
     order: "moment,desc",
     expand: "state",
   };
-  const filters = [];
-  if (momentFrom) filters.push(`moment>=${momentFrom}`);
-  if (momentTo) filters.push(`moment<=${momentTo}`);
   if (filters.length) query.filter = filters.join(";");
 
   const data = await msRequest("/entity/productiontask", { query });
@@ -159,16 +217,7 @@ export async function listProductionTasks({ limit = 50, momentFrom, momentTo } =
     applicable: t.applicable,
   }));
 
-  const concurrency = 3;
-  for (let i = 0; i < tasks.length; i += concurrency) {
-    const batch = tasks.slice(i, i + concurrency);
-    const productsBatch = await Promise.all(batch.map((t) => fetchTaskProducts(t.id)));
-    batch.forEach((t, idx) => {
-      t.products = productsBatch[idx];
-    });
-  }
-
-  return tasks;
+  return attachProducts(tasks);
 }
 
 export async function getProductionTaskDetail(id) {
