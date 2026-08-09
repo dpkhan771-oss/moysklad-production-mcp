@@ -108,19 +108,26 @@ export async function getProcessingPlanDetail(id) {
   };
 }
 
-function mapAssortmentRows(field) {
-  return (field?.rows || (Array.isArray(field) ? field : [])).map((r) => ({
+function mapAssortmentRows(rows) {
+  return (rows || []).map((r) => ({
     name: r.assortment?.name || r.name || "неизвестно",
     quantity: r.quantity,
     unit: r.assortment?.unit?.name || null,
   }));
 }
 
+// products на productiontask — не встраиваемая коллекция (expand на ней
+// возвращает ошибку 1089 "Expand поля 'products' не поддерживается"), а
+// отдельный вложенный под-ресурс: {meta: {href: ".../productiontask/{id}/products", size, ...}}.
+// Его нужно запрашивать отдельным GET по этому href, с собственным expand=assortment.
+async function fetchTaskProducts(taskId) {
+  const data = await msRequest(`/entity/productiontask/${taskId}/products`, {
+    query: { expand: "assortment", limit: 100 },
+  });
+  return mapAssortmentRows(data.rows || data);
+}
+
 export async function listProductionTasks({ limit = 50, momentFrom, momentTo } = {}) {
-  // ДИАГНОСТИКА: expand "products"/"positions"/"materials" во всех вариантах
-  // упирается в ошибку 1089 "Expand поля ... не поддерживается", в т.ч. на
-  // единичном GET. Временно вообще не разворачиваем products — смотрим,
-  // что МойСклад отдаёт "как есть" (raw), чтобы понять реальную форму поля.
   const query = {
     limit: Math.min(limit, 100),
     order: "moment,desc",
@@ -138,8 +145,16 @@ export async function listProductionTasks({ limit = 50, momentFrom, momentTo } =
     moment: t.moment,
     state: t.state?.name || null,
     applicable: t.applicable,
-    rawProducts: t.products,
   }));
+
+  const concurrency = 8;
+  for (let i = 0; i < tasks.length; i += concurrency) {
+    const batch = tasks.slice(i, i + concurrency);
+    const productsBatch = await Promise.all(batch.map((t) => fetchTaskProducts(t.id)));
+    batch.forEach((t, idx) => {
+      t.products = productsBatch[idx];
+    });
+  }
 
   return tasks;
 }
@@ -155,8 +170,7 @@ export async function getProductionTaskDetail(id) {
     moment: task.moment,
     state: task.state?.name || null,
     applicable: task.applicable,
-    rawProducts: task.products,
-    rawTopLevelKeys: Object.keys(task),
+    products: await fetchTaskProducts(id),
   };
 }
 
