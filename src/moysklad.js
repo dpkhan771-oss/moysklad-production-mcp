@@ -150,18 +150,18 @@ export async function getProfitByProduct({ momentFrom, momentTo } = {}) {
     if (pageRows.length < pageSize || offset >= total) break;
   }
 
+  // В отчёте МойСклад sellSum — выручка, а sellCostSum — себестоимость проданного
+  // (не выручка, несмотря на название). Поля costSum в ответе API не существует.
+  // margin — уже готовая рентабельность товара, отдаваемая самим МойСклад.
   return rows.map((r) => ({
     name: r.assortment?.name,
     productFolder:
       r.assortment?.productFolder?.name || r.assortment?.pathName || null,
     sellQuantity: r.sellQuantity,
-    sellCostSum: kopecksToRubles(r.sellCostSum),
-    costSum: kopecksToRubles(r.costSum),
+    revenue: kopecksToRubles(r.sellSum),
+    cost: kopecksToRubles(r.sellCostSum),
     profit: kopecksToRubles(r.profit),
-    marginPercent:
-      r.costSum && r.costSum !== 0
-        ? Math.round((r.profit / r.costSum) * 10000) / 100
-        : null,
+    marginPercent: r.margin ?? null,
   }));
 }
 
@@ -173,8 +173,8 @@ export async function getMarginBySegment({ momentFrom, momentTo } = {}) {
     if (!bySegment[key]) {
       bySegment[key] = { segment: key, revenue: 0, cost: 0, profit: 0, products: 0 };
     }
-    bySegment[key].revenue += r.sellCostSum || 0;
-    bySegment[key].cost += r.costSum || 0;
+    bySegment[key].revenue += r.revenue || 0;
+    bySegment[key].cost += r.cost || 0;
     bySegment[key].profit += r.profit || 0;
     bySegment[key].products += 1;
   }
