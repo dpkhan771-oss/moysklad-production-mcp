@@ -118,13 +118,13 @@ function mapAssortmentRows(field) {
 
 export async function listProductionTasks({ limit = 50, momentFrom, momentTo } = {}) {
   // expand требует явного limit<=100, иначе МойСклад молча игнорирует expand.
-  // Реальные поля productiontask (подтверждено через rawTopLevelKeys) — это
-  // "products" (выпускаемая продукция) и "productionRows" (позиции с сырьём/
-  // расходом материалов), а не "positions"/"materials".
+  // Реальное поле productiontask с выпускаемой продукцией (подтверждено через
+  // rawTopLevelKeys) — "products", а не "positions"/"materials". У productionRows
+  // нет вложенного assortment, поэтому его не разворачиваем.
   const query = {
     limit: Math.min(limit, 100),
     order: "moment,desc",
-    expand: "state,products.assortment,productionRows.assortment",
+    expand: "state,products.assortment",
   };
   const filters = [];
   if (momentFrom) filters.push(`moment>=${momentFrom}`);
@@ -139,16 +139,12 @@ export async function listProductionTasks({ limit = 50, momentFrom, momentTo } =
     state: t.state?.name || null,
     applicable: t.applicable,
     products: mapAssortmentRows(t.products),
-    productionRows: mapAssortmentRows(t.productionRows),
   }));
 }
 
 export async function getProductionTaskDetail(id) {
   const task = await msRequest(`/entity/productiontask/${id}`, {
-    query: {
-      expand: "products.assortment,productionRows.assortment,state",
-      limit: 100,
-    },
+    query: { expand: "products.assortment,state", limit: 100 },
   });
 
   return {
@@ -158,7 +154,6 @@ export async function getProductionTaskDetail(id) {
     state: task.state?.name || null,
     applicable: task.applicable,
     products: mapAssortmentRows(task.products),
-    productionRows: mapAssortmentRows(task.productionRows),
     rawTopLevelKeys: Object.keys(task),
   };
 }
