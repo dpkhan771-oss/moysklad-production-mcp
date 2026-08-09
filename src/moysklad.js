@@ -108,9 +108,21 @@ export async function getProcessingPlanDetail(id) {
   };
 }
 
+function mapAssortmentRows(field) {
+  return (field?.rows || (Array.isArray(field) ? field : [])).map((r) => ({
+    name: r.assortment?.name || r.name || "неизвестно",
+    quantity: r.quantity,
+    unit: r.assortment?.unit?.name || null,
+  }));
+}
+
 export async function listProductionTasks({ limit = 50, momentFrom, momentTo } = {}) {
   // expand требует явного limit<=100, иначе МойСклад молча игнорирует expand.
-  const query = { limit: Math.min(limit, 100), order: "moment,desc", expand: "state" };
+  const query = {
+    limit: Math.min(limit, 100),
+    order: "moment,desc",
+    expand: "state,positions.assortment,materials.assortment",
+  };
   const filters = [];
   if (momentFrom) filters.push(`moment>=${momentFrom}`);
   if (momentTo) filters.push(`moment<=${momentTo}`);
@@ -122,9 +134,38 @@ export async function listProductionTasks({ limit = 50, momentFrom, momentTo } =
     name: t.name,
     moment: t.moment,
     state: t.state?.name || null,
-    quantity: t.quantity,
     applicable: t.applicable,
+    positions: mapAssortmentRows(t.positions),
+    materials: mapAssortmentRows(t.materials),
+    rawTopLevelKeys: Object.keys(t),
   }));
+}
+
+// Диагностический метод: выводит сырые ключи верхнего уровня объекта задания
+// вместе с распознанными позициями/материалами, чтобы подтвердить реальные
+// названия полей МойСклад для планируемой к выпуску продукции конкретного
+// производственного задания (в списке /entity/productiontask они не разворачиваются).
+export async function getProductionTaskDetail(id) {
+  const task = await msRequest(`/entity/productiontask/${id}`, {
+    query: {
+      expand: "positions.assortment,materials.assortment,products.assortment,state",
+      limit: 100,
+    },
+  });
+
+  const mapRows = mapAssortmentRows;
+
+  return {
+    id: task.id,
+    name: task.name,
+    moment: task.moment,
+    state: task.state?.name || null,
+    applicable: task.applicable,
+    positions: mapRows(task.positions),
+    materials: mapRows(task.materials),
+    products: mapRows(task.products),
+    rawTopLevelKeys: Object.keys(task),
+  };
 }
 
 export async function getProfitByProduct({ momentFrom, momentTo } = {}) {
