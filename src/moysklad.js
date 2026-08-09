@@ -111,9 +111,10 @@ export async function getProcessingPlanDetail(id) {
 function mapAssortmentRows(rows) {
   return (rows || []).map((r) => ({
     name: r.assortment?.name || r.name || "неизвестно",
-    quantity: r.quantity,
+    // productiontaskresult называет количество "planQuantity", а не "quantity"
+    // (подтверждено через rawKeys на живом задании).
+    quantity: r.quantity ?? r.planQuantity ?? null,
     unit: r.assortment?.unit?.name || null,
-    rawKeys: Object.keys(r), // ДИАГНОСТИКА: quantity пуст у productiontaskresult — ищем реальное имя поля
   }));
 }
 
