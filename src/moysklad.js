@@ -328,3 +328,123 @@ export async function getCompanySettings() {
   const data = await msRequest("/context/companysettings");
   return data;
 }
+
+export async function findCounterparty(name) {
+  const data = await msRequest("/entity/counterparty", {
+    query: { search: name, limit: 10 },
+  });
+  const rows = data.rows || [];
+  if (rows.length === 0) {
+    throw new Error(`Контрагент "${name}" не найден в МоемСкладе`);
+  }
+  return rows.map((c) => ({
+    id: c.id,
+    name: c.name,
+    meta: c.meta,
+  }));
+}
+
+// Типы документов, формирующих взаиморасчёты с контрагентом, и их влияние на
+// сальдо "контрагент должен нам" (netEffect=+1 увеличивает эту задолженность,
+// -1 уменьшает — покрывает как продажи, так и закупки у контрагента).
+const RECONCILIATION_DOC_TYPES = [
+  { path: "/entity/demand", label: "Отгрузка", netEffect: 1 },
+  { path: "/entity/paymentin", label: "Оплата от контрагента", netEffect: -1 },
+  { path: "/entity/salesreturn", label: "Возврат от покупателя", netEffect: -1 },
+  { path: "/entity/supply", label: "Приёмка от контрагента", netEffect: -1 },
+  { path: "/entity/paymentout", label: "Оплата контрагенту", netEffect: 1 },
+  { path: "/entity/purchasereturn", label: "Возврат контрагенту", netEffect: 1 },
+];
+
+async function fetchDocsByAgent(path, agentHref, { momentFrom, momentTo } = {}) {
+  const filters = [`agent=${agentHref}`];
+  if (momentFrom) filters.push(`moment>=${momentFrom}`);
+  if (momentTo) filters.push(`moment<=${momentTo}`);
+
+  const pageSize = 100;
+  const rows = [];
+  let offset = 0;
+  while (true) {
+    const data = await msRequest(path, {
+      query: { filter: filters.join(";"), limit: pageSize, offset, order: "moment,asc" },
+    });
+    const pageRows = data.rows || [];
+    rows.push(...pageRows);
+    const total = data.meta?.size ?? rows.length;
+    offset += pageSize;
+    if (pageRows.length < pageSize || offset >= total) break;
+  }
+  // Сальдо считаем только по проведённым документам.
+  return rows.filter((r) => r.applicable !== false);
+}
+
+export async function getReconciliationReport({ counterpartyName, momentFrom, momentTo }) {
+  const matches = await findCounterparty(counterpartyName);
+  const counterparty = matches[0];
+  const agentHref = counterparty.meta.href;
+
+  let openingBalance = 0;
+  if (momentFrom) {
+    const priorDocs = await Promise.all(
+      RECONCILIATION_DOC_TYPES.map((cfg) =>
+        fetchDocsByAgent(cfg.path, agentHref, { momentTo: momentFrom }).then((docs) =>
+          docs
+            .filter((d) => d.moment < momentFrom)
+            .reduce((sum, d) => sum + kopecksToRubles(d.sum) * cfg.netEffect, 0)
+        )
+      )
+    );
+    openingBalance = Math.round(priorDocs.reduce((a, b) => a + b, 0) * 100) / 100;
+  }
+
+  const docsByType = await Promise.all(
+    RECONCILIATION_DOC_TYPES.map((cfg) => fetchDocsByAgent(cfg.path, agentHref, { momentFrom, momentTo }))
+  );
+
+  const movements = [];
+  RECONCILIATION_DOC_TYPES.forEach((cfg, idx) => {
+    for (const doc of docsByType[idx]) {
+      const amount = kopecksToRubles(doc.sum) || 0;
+      movements.push({
+        moment: doc.moment,
+        docType: cfg.label,
+        docName: doc.name || null,
+        amount,
+        netEffect: cfg.netEffect,
+      });
+    }
+  });
+  movements.sort((a, b) => (a.moment < b.moment ? -1 : a.moment > b.moment ? 1 : 0));
+
+  let balance = openingBalance;
+  const rows = movements.map((m) => {
+    // Положительный netEffect — контрагент должен нам больше (дебет),
+    // отрицательный — контрагент должен нам меньше (кредит).
+    const debit = m.netEffect > 0 ? m.amount : 0;
+    const credit = m.netEffect < 0 ? m.amount : 0;
+    balance = Math.round((balance + m.amount * m.netEffect) * 100) / 100;
+    return {
+      date: m.moment,
+      docType: m.docType,
+      docName: m.docName,
+      debit,
+      credit,
+      balance,
+    };
+  });
+
+  return {
+    counterparty: { id: counterparty.id, name: counterparty.name },
+    period: { from: momentFrom || null, to: momentTo || null },
+    openingBalance,
+    closingBalance: balance,
+    // Положительное сальдо: контрагент должен нам. Отрицательное: мы должны контрагенту.
+    balanceMeaning:
+      balance > 0
+        ? "Контрагент должен нам"
+        : balance < 0
+        ? "Мы должны контрагенту"
+        : "Задолженность отсутствует",
+    rows,
+  };
+}
