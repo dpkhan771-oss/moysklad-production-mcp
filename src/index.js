@@ -12,6 +12,7 @@ import {
   getStockAll,
   listProducts,
   getCompanySettings,
+  getReconciliationReport,
 } from "./moysklad.js";
 
 function buildServer() {
@@ -121,6 +122,20 @@ function buildServer() {
     async () => {
       const settings = await getCompanySettings();
       return { content: [{ type: "text", text: JSON.stringify(settings, null, 2) }] };
+    }
+  );
+
+  server.tool(
+    "get_reconciliation_report",
+    "Акт сверки взаиморасчётов с контрагентом за период: находит контрагента по названию, собирает отгрузки, приёмки, оплаты и возвраты, и строит таблицу с бегущим сальдо (начальный остаток, дебет/кредит по каждому документу, конечный остаток).",
+    {
+      counterpartyName: z.string().describe("Название контрагента для поиска, например 'ИП Хаузер'"),
+      momentFrom: z.string().optional().describe("Начало периода, YYYY-MM-DD HH:MM:SS. Если не указано — начальный остаток считается нулевым"),
+      momentTo: z.string().optional().describe("Конец периода, YYYY-MM-DD HH:MM:SS"),
+    },
+    async ({ counterpartyName, momentFrom, momentTo }) => {
+      const report = await getReconciliationReport({ counterpartyName, momentFrom, momentTo });
+      return { content: [{ type: "text", text: JSON.stringify(report, null, 2) }] };
     }
   );
 
