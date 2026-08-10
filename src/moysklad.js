@@ -295,11 +295,32 @@ export async function getMarginBySegment({ momentFrom, momentTo } = {}) {
   }));
 }
 
-export async function getStockAll({ search, limit = 100 } = {}) {
-  const query = { limit };
-  if (search) query.search = search;
-  const data = await msRequest("/report/stock/all", { query });
-  return (data.rows || data).map((r) => ({
+export async function getStockAll({ search } = {}) {
+  // /report/stock/all игнорирует query-параметр search (МойСклад его не
+  // поддерживает для этого отчёта — он молча возвращает первую страницу
+  // независимо от значения), поэтому раньше search не работал и вдобавок
+  // результат обрезался фиксированным limit=100. Забираем отчёт целиком
+  // постранично и фильтруем по названию на своей стороне.
+  const pageSize = 1000;
+  const rows = [];
+  let offset = 0;
+  while (true) {
+    const data = await msRequest("/report/stock/all", {
+      query: { limit: pageSize, offset },
+    });
+    const pageRows = data.rows || data;
+    rows.push(...pageRows);
+    const total = data.meta?.size ?? rows.length;
+    offset += pageSize;
+    if (pageRows.length < pageSize || offset >= total) break;
+  }
+
+  const needle = search ? search.toLowerCase() : null;
+  const filtered = needle
+    ? rows.filter((r) => (r.name || "").toLowerCase().includes(needle))
+    : rows;
+
+  return filtered.map((r) => ({
     name: r.name,
     code: r.code || null,
     article: r.article || null,
@@ -312,16 +333,46 @@ export async function getStockAll({ search, limit = 100 } = {}) {
   }));
 }
 
-export async function listProducts({ search, limit = 100 } = {}) {
-  const query = { limit };
-  if (search) query.search = search;
-  const data = await msRequest("/entity/product", { query });
-  return (data.rows || []).map((p) => ({
+export async function listProducts({ search, limit = 1000, offset = 0, all = false } = {}) {
+  const baseQuery = {};
+  if (search) baseQuery.search = search;
+  // buyPrice — цена последней закупки/учётная себестоимость на карточке
+  // товара. Она хранится независимо от текущего остатка, поэтому это
+  // единственный надёжный источник цены для позиций с нулевым остатком
+  // (например, крышки и этикетки, которые полностью израсходованы в
+  // производстве и потому не попадают в /report/stock/all).
+
+  if (!all) {
+    const data = await msRequest("/entity/product", {
+      query: { ...baseQuery, limit, offset },
+    });
+    return (data.rows || []).map(mapProduct);
+  }
+
+  const pageSize = 1000;
+  const rows = [];
+  let currentOffset = offset;
+  while (true) {
+    const data = await msRequest("/entity/product", {
+      query: { ...baseQuery, limit: pageSize, offset: currentOffset },
+    });
+    const pageRows = data.rows || [];
+    rows.push(...pageRows);
+    const total = data.meta?.size ?? rows.length;
+    currentOffset += pageSize;
+    if (pageRows.length < pageSize || currentOffset >= total) break;
+  }
+  return rows.map(mapProduct);
+}
+
+function mapProduct(p) {
+  return {
     id: p.id,
     name: p.name,
     code: p.code || null,
     article: p.article || null,
-  }));
+    lastPurchasePrice: kopecksToRubles(p.buyPrice?.value),
+  };
 }
 
 export async function getCompanySettings() {

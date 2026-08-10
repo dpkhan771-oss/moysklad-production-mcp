@@ -97,8 +97,8 @@ function buildServer() {
 
   server.tool(
     "get_stock_all",
-    "Остатки товаров на складах (сырьё и готовая продукция): количество, резерв, цена. Можно искать по названию.",
-    { search: z.string().optional().describe("Поиск по названию товара") },
+    "Остатки товаров на складах (сырьё и готовая продукция): количество, резерв, цена. Поиск по названию фильтруется на стороне сервера (МойСклад не поддерживает search для этого отчёта). Возвращает только позиции с ненулевым остатком — для товаров с нулевым остатком (полностью израсходованное сырьё/комплектующие) используй list_products и поле lastPurchasePrice.",
+    { search: z.string().optional().describe("Поиск по названию товара (подстрока, без учёта регистра)") },
     async ({ search }) => {
       const stock = await getStockAll({ search });
       return { content: [{ type: "text", text: JSON.stringify(stock, null, 2) }] };
@@ -107,10 +107,15 @@ function buildServer() {
 
   server.tool(
     "list_products",
-    "Список товаров (справочник) с их ID, названием, кодом и артикулом. Можно искать по названию.",
-    { search: z.string().optional().describe("Поиск по названию товара") },
-    async ({ search }) => {
-      const products = await listProducts({ search });
+    "Список товаров (справочник) с их ID, названием, кодом, артикулом и ценой последней закупки (lastPurchasePrice — учётная себестоимость на карточке товара, доступна даже при нулевом остатке, в отличие от get_stock_all). По умолчанию до 1000 записей за запрос; используй all=true, чтобы получить полный список за несколько запросов, либо offset для постраничной навигации.",
+    {
+      search: z.string().optional().describe("Поиск по названию товара"),
+      limit: z.number().int().min(1).max(1000).optional().describe("Максимум записей за один запрос (по умолчанию 1000)"),
+      offset: z.number().int().min(0).optional().describe("Смещение для постраничной навигации"),
+      all: z.boolean().optional().describe("Забрать все страницы целиком, игнорируя limit/offset"),
+    },
+    async ({ search, limit, offset, all }) => {
+      const products = await listProducts({ search, limit, offset, all });
       return { content: [{ type: "text", text: JSON.stringify(products, null, 2) }] };
     }
   );
