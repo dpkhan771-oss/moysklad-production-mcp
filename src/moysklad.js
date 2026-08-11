@@ -295,18 +295,36 @@ export async function getMarginBySegment({ momentFrom, momentTo } = {}) {
   }));
 }
 
-export async function getStockAll({ search } = {}) {
+export async function listStores() {
+  const data = await msRequest("/entity/store");
+  return (data.rows || []).map((s) => ({
+    id: s.id,
+    name: s.name,
+    archived: !!s.archived,
+  }));
+}
+
+export async function getStockAll({ search, storeId } = {}) {
   // /report/stock/all игнорирует query-параметр search (МойСклад его не
   // поддерживает для этого отчёта — он молча возвращает первую страницу
   // независимо от значения), поэтому раньше search не работал и вдобавок
   // результат обрезался фиксированным limit=100. Забираем отчёт целиком
   // постранично и фильтруем по названию на своей стороне.
+  //
+  // Без storeId отчёт суммирует остатки по ВСЕМ складам сразу (например,
+  // Астана + Алматы вместе) — передай storeId (см. list_stores), чтобы
+  // получить остатки только по одному складу.
+  const query = { limit: 1000 };
+  if (storeId) {
+    query.filter = `store=${BASE_URL}/entity/store/${storeId}`;
+  }
+
   const pageSize = 1000;
   const rows = [];
   let offset = 0;
   while (true) {
     const data = await msRequest("/report/stock/all", {
-      query: { limit: pageSize, offset },
+      query: { ...query, offset },
     });
     const pageRows = data.rows || data;
     rows.push(...pageRows);

@@ -13,6 +13,7 @@ import {
   listProducts,
   getCompanySettings,
   getReconciliationReport,
+  listStores,
 } from "./moysklad.js";
 
 function buildServer() {
@@ -96,11 +97,24 @@ function buildServer() {
   );
 
   server.tool(
+    "list_stores",
+    "Список складов организации (например, Астана, Алматы) с их ID. Используй storeId отсюда в get_stock_all, чтобы получить остатки по конкретному складу вместо суммы по всем сразу.",
+    {},
+    async () => {
+      const stores = await listStores();
+      return { content: [{ type: "text", text: JSON.stringify(stores, null, 2) }] };
+    }
+  );
+
+  server.tool(
     "get_stock_all",
-    "Остатки товаров на складах (сырьё и готовая продукция): количество, резерв, цена. Поиск по названию фильтруется на стороне сервера (МойСклад не поддерживает search для этого отчёта). Возвращает только позиции с ненулевым остатком — для товаров с нулевым остатком (полностью израсходованное сырьё/комплектующие) используй list_products и поле lastPurchasePrice.",
-    { search: z.string().optional().describe("Поиск по названию товара (подстрока, без учёта регистра)") },
-    async ({ search }) => {
-      const stock = await getStockAll({ search });
+    "Остатки товаров на складах (сырьё и готовая продукция): количество, резерв, цена. Поиск по названию фильтруется на стороне сервера (МойСклад не поддерживает search для этого отчёта). Без storeId суммирует остатки по ВСЕМ складам сразу — передай storeId (см. list_stores), чтобы получить остатки только по одному складу (например, отдельно Астана и отдельно Алматы). Возвращает только позиции с ненулевым остатком — для товаров с нулевым остатком (полностью израсходованное сырьё/комплектующие) используй list_products и поле lastPurchasePrice.",
+    {
+      search: z.string().optional().describe("Поиск по названию товара (подстрока, без учёта регистра)"),
+      storeId: z.string().optional().describe("UUID склада из list_stores — ограничить остатки одним складом"),
+    },
+    async ({ search, storeId }) => {
+      const stock = await getStockAll({ search, storeId });
       return { content: [{ type: "text", text: JSON.stringify(stock, null, 2) }] };
     }
   );
