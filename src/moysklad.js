@@ -398,6 +398,58 @@ export async function getCompanySettings() {
   return data;
 }
 
+function mapCounterparty(c) {
+  return {
+    id: c.id,
+    name: c.name,
+    companyType: c.companyType || null,
+    city: c.actualAddressFull?.city || c.legalAddressFull?.city || null,
+    actualAddress: c.actualAddress || null,
+    legalAddress: c.legalAddress || null,
+    phone: c.phone || null,
+    email: c.email || null,
+    archived: !!c.archived,
+  };
+}
+
+export async function listCounterparties({ search, city, limit = 1000, offset = 0, all = false } = {}) {
+  const baseQuery = {};
+  if (search) baseQuery.search = search;
+
+  // МойСклад не поддерживает filter по вложенным полям адреса
+  // (actualAddressFull.city), поэтому при указанном city забираем весь
+  // список постранично и фильтруем на своей стороне — как get_stock_all
+  // делает для search.
+  if (!all && !city) {
+    const data = await msRequest("/entity/counterparty", {
+      query: { ...baseQuery, limit, offset },
+    });
+    return (data.rows || []).map(mapCounterparty);
+  }
+
+  const pageSize = 1000;
+  const rows = [];
+  let currentOffset = all ? offset : 0;
+  while (true) {
+    const data = await msRequest("/entity/counterparty", {
+      query: { ...baseQuery, limit: pageSize, offset: currentOffset },
+    });
+    const pageRows = data.rows || [];
+    rows.push(...pageRows);
+    const total = data.meta?.size ?? rows.length;
+    currentOffset += pageSize;
+    if (pageRows.length < pageSize || currentOffset >= total) break;
+  }
+
+  const mapped = rows.map(mapCounterparty);
+  if (!city) return mapped;
+
+  const needle = city.toLowerCase();
+  return mapped.filter((c) =>
+    [c.city, c.actualAddress, c.legalAddress].some((v) => (v || "").toLowerCase().includes(needle))
+  );
+}
+
 export async function findCounterparty(name) {
   const data = await msRequest("/entity/counterparty", {
     query: { search: name, limit: 10 },

@@ -14,6 +14,7 @@ import {
   getCompanySettings,
   getReconciliationReport,
   listStores,
+  listCounterparties,
 } from "./moysklad.js";
 
 function buildServer() {
@@ -141,6 +142,22 @@ function buildServer() {
     async () => {
       const settings = await getCompanySettings();
       return { content: [{ type: "text", text: JSON.stringify(settings, null, 2) }] };
+    }
+  );
+
+  server.tool(
+    "list_counterparties",
+    "Список контрагентов (покупатели, поставщики) с городом и адресом. Используй city для фильтра по городу (например 'Алматы') — ищет без учёта регистра по структурированному полю город и по текстовым адресам; такой поиск всегда забирает контрагентов постранично целиком, так как МойСклад не поддерживает серверный фильтр по городу. Без city — обычный список (до 1000 записей за запрос, offset для навигации, all=true — забрать всё).",
+    {
+      search: z.string().optional().describe("Поиск по названию контрагента (серверный поиск МойСклад)"),
+      city: z.string().optional().describe("Фильтр по городу, например 'Алматы' (без учёта регистра, ищет и по структурированному полю, и по тексту адреса)"),
+      limit: z.number().int().min(1).max(1000).optional().describe("Максимум записей за один запрос (по умолчанию 1000, игнорируется при указанном city)"),
+      offset: z.number().int().min(0).optional().describe("Смещение для постраничной навигации (игнорируется при указанном city)"),
+      all: z.boolean().optional().describe("Забрать все страницы целиком, игнорируя limit/offset"),
+    },
+    async ({ search, city, limit, offset, all }) => {
+      const counterparties = await listCounterparties({ search, city, limit, offset, all });
+      return { content: [{ type: "text", text: JSON.stringify(counterparties, null, 2) }] };
     }
   );
 
