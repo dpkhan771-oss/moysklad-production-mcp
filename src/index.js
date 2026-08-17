@@ -15,6 +15,7 @@ import {
   getReconciliationReport,
   listStores,
   listCounterparties,
+  listShipmentsByStore,
 } from "./moysklad.js";
 
 function buildServer() {
@@ -158,6 +159,20 @@ function buildServer() {
     async ({ search, city, limit, offset, all }) => {
       const counterparties = await listCounterparties({ search, city, limit, offset, all });
       return { content: [{ type: "text", text: JSON.stringify(counterparties, null, 2) }] };
+    }
+  );
+
+  server.tool(
+    "list_shipments_by_store",
+    "Отгруженный товар (реализованные позиции по проведённым отгрузкам-демандам) с конкретного склада за период: агрегирует количество по каждому товару и число отгрузок, в которых он встречался. Передай storeId (см. list_stores), например склад Алматы.",
+    {
+      storeId: z.string().describe("UUID склада из list_stores"),
+      momentFrom: z.string().optional().describe("Начало периода, YYYY-MM-DD HH:MM:SS"),
+      momentTo: z.string().optional().describe("Конец периода, YYYY-MM-DD HH:MM:SS"),
+    },
+    async ({ storeId, momentFrom, momentTo }) => {
+      const report = await listShipmentsByStore({ storeId, momentFrom, momentTo });
+      return { content: [{ type: "text", text: JSON.stringify(report, null, 2) }] };
     }
   );
 
