@@ -398,6 +398,63 @@ export async function getCompanySettings() {
   return data;
 }
 
+export async function listShipmentsByStore({ storeId, momentFrom, momentTo } = {}) {
+  const filters = [`store=${BASE_URL}/entity/store/${storeId}`];
+  if (momentFrom) filters.push(`moment>=${momentFrom}`);
+  if (momentTo) filters.push(`moment<=${momentTo}`);
+
+  // expand требует явного limit<=100, иначе МойСклад молча игнорирует expand.
+  const pageSize = 100;
+  const demands = [];
+  let offset = 0;
+  while (true) {
+    const data = await msRequest("/entity/demand", {
+      query: {
+        filter: filters.join(";"),
+        limit: pageSize,
+        offset,
+        expand: "positions.assortment",
+        order: "moment,asc",
+      },
+    });
+    const rows = data.rows || [];
+    demands.push(...rows);
+    const total = data.meta?.size ?? demands.length;
+    offset += pageSize;
+    if (rows.length < pageSize || offset >= total) break;
+  }
+
+  // Сальдо/выпуск считаем только по проведённым отгрузкам.
+  const applicable = demands.filter((d) => d.applicable !== false);
+
+  const byProduct = {};
+  for (const d of applicable) {
+    const positions = d.positions?.rows || d.positions || [];
+    const seenInThisDemand = new Set();
+    for (const p of positions) {
+      const name = p.assortment?.name || "неизвестно";
+      const unit = p.assortment?.unit?.name || null;
+      if (!byProduct[name]) {
+        byProduct[name] = { product: name, unit, quantity: 0, shipmentsCount: 0 };
+      }
+      byProduct[name].quantity += p.quantity || 0;
+      if (!seenInThisDemand.has(name)) {
+        byProduct[name].shipmentsCount += 1;
+        seenInThisDemand.add(name);
+      }
+    }
+  }
+
+  return {
+    storeId,
+    period: { from: momentFrom || null, to: momentTo || null },
+    shipmentsTotal: applicable.length,
+    products: Object.values(byProduct)
+      .map((r) => ({ ...r, quantity: Math.round(r.quantity * 100) / 100 }))
+      .sort((a, b) => b.quantity - a.quantity),
+  };
+}
+
 function mapCounterparty(c) {
   return {
     id: c.id,
